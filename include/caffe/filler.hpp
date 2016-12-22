@@ -12,7 +12,16 @@
 #include "caffe/syncedmem.hpp"
 #include "caffe/util/math_functions.hpp"
 
+using namespace std;
+
+const int PI = 3.14159;
+
+
+
 namespace caffe {
+
+
+
 
 /// @brief Fills a Blob with constant or randomly-generated data.
 template <typename Dtype>
@@ -261,6 +270,182 @@ class BilinearFiller : public Filler<Dtype> {
   }
 };
 
+
+//use this is Filler.hpp in caffe/include/caffe/filler.hpp as custom one
+template <typename Dtype>
+class SobelFiller : public Filler<Dtype> {
+    public:
+    explicit SobelFiller(const FillerParameter& param)
+      : Filler<Dtype>(param) {}
+    virtual void Fill(Blob<Dtype>* blob) {
+        Dtype* data = blob->mutable_cpu_data();
+        DCHECK(blob->count());
+        caffe_rng_uniform<Dtype>(blob->count(), 0, 1, blob->mutable_cpu_data());
+        // We expect the filler to not be called very frequently, so we will
+        // just use a simple implementation
+        int dim = blob->count() / blob->num();
+        CHECK(dim);
+
+        //create sobel filter by matrix multiplication
+        assert(blob->height() == blob->width());
+        int kernel_size = blob->height() * blob->width();
+        vector<float> matrixA (blob->height(), 0);
+        vector<float> matrixB (blob->height(), 0);
+        vector<float> sobelFilter (kernel_size, 0);
+
+        //fill matrix A [1,2,1]
+        //fill matrix B [-1,0,1]
+        // now scale with (matrixA.size()-1)
+        for (int i = 0; i < matrixA.size(); ++i)
+        {
+            matrixA[i] = i < matrixA.size()/2 ? 1.0 * (i+1)/(matrixA.size()-1) : 1.0 * (matrixA.size() - i)/(matrixA.size()-1);
+            matrixB[i] = 1.0 * ((int)(matrixB.size()/2) - i)/(matrixA.size()-1);
+        }
+
+        for (int row = 0; row < blob->height(); row++) {
+            for (int col = 0; col < blob->width(); col++) {
+               // Multiply the row of A by the column of B to get the value of product.
+                sobelFilter[row*blob->height()+col] = matrixA[row] * matrixB[col];
+            }
+        }
+        for (int i = 0; i < blob->count(); ++i)
+        {
+            data[i] = sobelFilter[i % kernel_size];
+        }
+
+    CHECK_EQ(this->filler_param_.sparse(), -1)
+         << "Sparsity not supported by this Filler.";
+    }
+};
+
+
+
+//use this is Filler.hpp in caffe/include/caffe/filler.hpp as custom one
+template <typename Dtype>
+class GaborFiller : public Filler<Dtype> {
+    public:
+    explicit GaborFiller(const FillerParameter& param)
+      : Filler<Dtype>(param) {}
+    virtual void Fill(Blob<Dtype>* blob) {
+        Dtype* data = blob->mutable_cpu_data();
+        DCHECK(blob->count());
+        caffe_rng_uniform<Dtype>(blob->count(), 0, 1, blob->mutable_cpu_data());
+        // We expect the filler to not be called very frequently, so we will
+        // just use a simple implementation
+        int dim = blob->count() / blob->num();
+        CHECK(dim);
+
+        //create sobel filter by matrix multiplication
+        assert(blob->height() == blob->width());
+        int kernel_size = blob->height() * blob->width();
+
+        vector<float> gaborFilter (kernel_size, 0);
+
+        //gabor filter with gaussian distribution
+        //Gabor filter is a Gaussian kernel function modulated by a sinusoidal plane wave.
+        float th = 0;
+        float lm = 1;
+        float ps = 3;
+        float sig = 1;
+
+        for (int filterNum =0; filterNum< blob->num(); filterNum++)
+        {
+            float th_delta = 0;
+            float lm_delta = 0;
+            float sig_delta = 0;
+
+            if (filterNum%3 == 0)
+            {
+                th_delta =  int(filterNum/3 + 1) * 15;
+            }
+            else if (filterNum%3 == 1)
+            {
+                lm_delta =  int(filterNum/3 + 1) * 0.5;
+            }
+            else
+            {
+                sig_delta =  int(filterNum/3 + 1) * 1;
+            }
+
+
+
+            //create a gaborfilter and fill values to gaborFilter here (instead of using separate function)
+            // int ks = blob->height();
+            // int hks = (ks-1)/2;
+            // float del = 2.0/(ks-1);
+            // int theta = th+th_delta;
+            // int lambda = lm+lm_delta;
+            // int sigma = sig+ sig_delta;
+            // float x_theta;
+            // float y_theta;
+
+            // for (int y=-hks; y<=hks; y++)
+            // {
+            //     for (int x=-hks; x<=hks; x++)
+            //     {
+            //         x_theta = x*del*cos(theta)+y*del*sin(theta);
+            //         y_theta = -x*del*sin(theta)+y*del*cos(theta);
+            //         gaborFilter[(hks+x) + (hks+y)*ks] = (float)exp(-0.5*(pow(x_theta,2)+pow(y_theta,2))/pow(sigma,2))* cos(2*PI*x_theta/lambda + ps);                }
+            // }
+            // gaborFilter created; Fill in the data
+
+
+
+            gaborFilter = gabor_filter_generator(blob->height(), th+th_delta, lm+lm_delta, ps, sig+sig_delta);
+
+            for (int i = 0; i < kernel_size; ++i)
+            {
+                data[filterNum*kernel_size+i] = gaborFilter[i];
+            }
+
+
+        }
+        // gaborFilter = gabor_filter_generator(blob->height(), th+th_delta, lm+lm_delta, ps, sig+sig_delta)
+
+        // gabor_filter_generator(blob->height(), th, lm, ps, sig, gaborFilter);
+
+        // for (int i = 0; i < blob->count(); ++i)
+        // {
+        //  data[i] = gaborFilter[i % kernel_size];
+        // }
+
+    CHECK_EQ(this->filler_param_.sparse(), -1)
+         << "Sparsity not supported by this Filler.";
+    }
+
+    //custom gabor filter
+    vector<float> gabor_filter_generator(int ks, float th, float lm, float ps, float sig)
+    {
+        int kernel_size = ks * ks;
+        int hks = (ks-1)/2;
+
+        // float theta = th*PI/180;
+        // float psi = ps*PI/180;
+        // float sigma = sig/ks;
+
+        float theta = th;
+        float psi = ps;
+        float del = 2.0/(ks-1);
+        float lambda = lm;
+        float sigma = sig;
+        float x_theta;
+        float y_theta;
+        vector<float> gaborFilter (kernel_size, 0);
+        for (int y=-hks; y<=hks; y++)
+        {
+            for (int x=-hks; x<=hks; x++)
+            {
+                x_theta = x*del*cos(theta)+y*del*sin(theta);
+                y_theta = -x*del*sin(theta)+y*del*cos(theta);
+                gaborFilter[(hks+x) + (hks+y)*ks] = (float)exp(-0.5*(pow(x_theta,2)+pow(y_theta,2))/pow(sigma,2))* cos(2*PI*x_theta/lambda + psi);
+                // np.exp(-.5 * (x_theta ** 2 / sigma_x ** 2 + y_theta ** 2 / sigma_y ** 2)) * np.cos(2 * np.pi / Lambda * x_theta + psi)
+            }
+        }
+        return gaborFilter;
+    }
+};
+
+
 /**
  * @brief Get a specific filler from the specification given in FillerParameter.
  *
@@ -284,6 +469,10 @@ Filler<Dtype>* GetFiller(const FillerParameter& param) {
     return new MSRAFiller<Dtype>(param);
   } else if (type == "bilinear") {
     return new BilinearFiller<Dtype>(param);
+    } else if (type == "sobel") {
+        return new SobelFiller<Dtype>(param);
+    } else if (type == "gabor") {
+        return new GaborFiller<Dtype>(param);
   } else {
     CHECK(false) << "Unknown filler name: " << param.type();
   }
